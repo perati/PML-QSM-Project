@@ -1,0 +1,193 @@
+###Quantified Self Movement-Predict dumbell exersise goodness
+*cperati, February 2016*
+<br><br>
+  
+    
+####Executive Summary
+The quantified self movement use a number of devices that quantify the
+performance of different activities. The dataset consists of measures regarding
+the execution of dumbell, a weight lifting exercises, performed in 5 different
+ways. The goal of this project is to create a model to predict the manner
+which the exercise was performed. The dataset is available in the publication 
+***"Wearable Computing: Accelerometers' Data Classification of Body Postures
+and Movements"***, at <http://groupware.les.inf.puc-rio.br/har>.
+<br>
+  
+The approach followed was to first minimize the size of the dataset by
+discarding variables with no signifigance. Then three different model types
+where created using a small subset of the original data. The models where
+evaluated to select one with the best performance which was the random
+forests. After selecting the model type, a final model was created and
+successfully tested with a validation set, with a model out-of-box estimated
+error rate of just 0.5%, and perfect accuracy and kappa for the prediction.
+The model was then applied to the original test set, with as good OOB
+estimated error, suggesting similar high accurate results.
+<br><br>
+  
+####1. Exploration and preparation of data
+#####Load the data
+
+```{r,cache=TRUE}
+trainURL<-'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+testURL<-'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+
+download.file(trainURL,'train.csv')
+download.file(testURL,'test.csv')
+
+train<-read.csv('train.csv'); test<-read.csv('test.csv')
+
+library(caret);library(randomForest);library(rpart)
+```
+```{r,cache=TRUE}
+dim(train);dim(test)
+```
+<br>
+  
+#####Treating Missing Values
+The dataset consists of 160 variables out of which 93 have no missing values.
+However 67 variables have 19216 missing values in 19622 observations. Since only
+2% of these variables include values, the decision is to discard them.
+```{r,cache=TRUE}
+trainNAs<-as.data.frame(sapply(train, function(x) sum(is.na(x))))
+names(trainNAs)<-c('NAS')
+trainNotNAs <- row.names(subset(trainNAs, NAS != 0))
+trainNAsRem <- names(train) %in% trainNotNAs
+train0<-train[!trainNAsRem]
+```
+<br>
+  
+#####Discard variables with no signifigant value
+There are two categories of variables that were removed. First, the seven
+variables at the beginning of the dataset have no prediction value, as well as 
+all variables with almost zero variation.
+```{r,cache=TRUE}
+train0<-train0[,-(1:7)]
+nzv0<-nearZeroVar(train0)
+train0<-train0[,-nzv0]
+```
+<br>
+  
+#####Prepare Testing set
+The alterations performed to the training set should also be applied to the
+testing set. That is to remove the same variables so the two sets are aligned.
+After all alterations the variables of the training and test sets are reduced
+to 53.
+```{r,cache=TRUE}
+test0<-test[!trainNAsRem]
+test0<-test0[,-(1:7)]
+test0<-test0[,-nzv0]
+dim(train0);dim(test0)
+```
+<br>
+  
+####2. Model Creation, Evaluation, and Selection
+The desision is to explore different models by using only a sample of
+the dataset. With this approach we reduce the computation time without affecting
+the results, atleast to the point of evaluating the performace of
+different models.
+<br>
+  
+#####Sample preparation
+The sample data is a random selection of the finalised training data (train0),
+1/5 of its size. This sample data will be further divited in a training
+and testing set for the model creation.
+```{r,cache=TRUE}
+set.seed(11543)
+dpS<-createDataPartition(train0$classe,list = FALSE,p=0.2)
+sample<-train0[dpS,];dim(sample)
+```
+<br>
+```{r,cache=TRUE}
+dpS2<-createDataPartition(sample$classe,list = FALSE,p=0.7)
+trainS<-sample[dpS2,];testS<-sample[-dpS2,]
+dim(trainS);dim(testS)
+```
+<br>
+  
+#####Model creation
+Three tree based classification models are evaluated.<br>
+1. A random forests model<br>
+2. A generalised boosted regression model. gbm<br>
+3. A recursive partitioning model. rpart<br>
+<br>
+  
+Random Forests<br>
+```{r,cache=TRUE}
+modS1<-randomForest(classe ~.,data = trainS,importance = TRUE)
+preS1<-predict(modS1,testS)
+confusionMatrix(preS1,testS$classe)$overall
+```
+<br>
+  
+Generalised boosted regression model<br>
+```{r,echo=FALSE,cache=TRUE}
+modS2<-train(classe~., method="gbm",data=trainS,verbose=F,
+               trControl = trainControl(method = "cv", number = 5))
+```
+
+```{r,cache=TRUE}
+preS2<-predict(modS2,testS)
+confusionMatrix(preS2,testS$classe)$overall
+```
+<br>
+  
+Recursive partitioning<br>
+```{r,cache=TRUE}
+modS3<-rpart(classe~.,data=trainS,method = 'class')
+preS3<-predict(modS3,testS,type = 'class')
+confusionMatrix(preS3,testS$classe)$overall
+```
+<br>
+  
+#####Model Evaluation and Selection
+Among the 3 models, random forests performed better with a very high
+accuracy (0.96) and kappa statistic (0.95), probably due to the creation of a
+large number of bootstrapped trees. The generalised boosted model with a 5-fold
+cross validation perfomed slightly lower, whereas the recursive partitioning performance was fair. So, random forests is used to create the model for
+the finalised training data (train0).
+<br><br>
+  
+  
+####3. Final Model and Prediction
+The approach followed to create the final model is to further partition 
+the training data (train0) to a new training set (train1) and validation
+set (valid1). The model is trained with the train1 set, and then evaluated with
+the valid1 set before proceeding to the final prediction to the finalised
+test set (test0).
+<br>
+  
+#####Final Model Creation and Validation
+```{r,cache=TRUE}  
+set.seed(11543)
+dp0 <- createDataPartition(train0$classe, p = 0.7, list=FALSE)
+train1 <- train0[dp0,]
+valid1 <- train0[-dp0,]
+dim(train1);dim(valid1)
+```
+<br>
+  
+  
+```{r,cache=TRUE}
+mod1<-randomForest(classe ~.,data = train1,importance = TRUE)
+pre1<-predict(mod1,valid1)
+mod1;confusionMatrix(pre1,valid1$classe)
+```
+<br>
+  
+#####Final Prediction
+The test on the validation data confirmed the goodness of the model with
+perfect accuracy and kappa statistic. This outcome assures that the final
+prediction on the test set (test0) shares the same highly accurate results.
+The out-of-box estimated error rate is a good estimation of the result with
+less than 0.02% error for all classes over 100 trees.
+```{r,cache=TRUE}
+set.seed(11543)
+mod0<-randomForest(classe ~.,data = train1,importance = TRUE)
+pre0<-predict(mod0,test0);mod0;plot(mod0,log='y');pre0
+```
+<br>
+
+
+<br>
+  
+    
